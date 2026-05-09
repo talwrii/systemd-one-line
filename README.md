@@ -10,10 +10,22 @@ Just edit the file
 systemd can do something similar, but the files are not persisted.
 
 ## Installation
-pipx install systemd-one-line
+`pipx install systemd-one-line`
 
 ## Usage
 Create a new service
 `systemd-one-line service --exec blah --timer --every 1h`
 
 `systemd-one-line service --edit --exec blah --timer --every 1h`
+
+Crete a user daeomon which starts when you log in:
+
+```
+systemd-one-line service \
+  --user --autostart \
+  --name bgmus \
+  --type simple \
+  --exec "$HOME/.local/bin/bgmus" \
+  --edit
+```
+

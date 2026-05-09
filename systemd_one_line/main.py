@@ -56,10 +56,15 @@ def systemctl(user: bool, *args, check=True):
     return run(cmd, check=check)
 
 
+def default_install_target(user: bool) -> str:
+    return "default.target" if user else "multi-user.target"
+
+
 # ---------- unit file rendering ----------
 
 def render_service(exec_cmd: str, description: str, service_type: str,
-                   user: str = None, extra: list = None) -> str:
+                   user: str = None, extra: list = None,
+                   install_target: str = None) -> str:
     lines = [
         "[Unit]",
         f"Description={description}",
@@ -72,6 +77,14 @@ def render_service(exec_cmd: str, description: str, service_type: str,
         lines.append(f"User={user}")
     if extra:
         lines.extend(extra)
+
+    if install_target:
+        lines.extend([
+            "",
+            "[Install]",
+            f"WantedBy={install_target}",
+        ])
+
     lines.append("")
     return "\n".join(lines)
 
@@ -148,11 +161,22 @@ def cmd_service(args):
 
     description = args.description or f"{name} (managed by systemd-one-line)"
 
+    # Decide whether the service unit itself needs an [Install] section.
+    # When there's a timer, the timer is what gets enabled; the service is
+    # invoked by the timer and shouldn't have its own [Install].
+    if has_timer:
+        service_install_target = None
+    elif args.autostart:
+        service_install_target = args.install_target or default_install_target(args.user)
+    else:
+        service_install_target = None
+
     service_body = render_service(
         exec_cmd=args.exec,
         description=description,
         service_type=args.type,
         user=args.run_as,
+        install_target=service_install_target,
     )
     write_unit(svc_path, service_body, user=args.user)
     print(f"wrote {svc_path}", file=sys.stderr)
@@ -175,12 +199,20 @@ def cmd_service(args):
         return
 
     systemctl(args.user, "daemon-reload")
+
     if has_timer:
         systemctl(args.user, "enable", "--now", f"{name}.timer")
         print(f"enabled and started {name}.timer", file=sys.stderr)
-    else:
+    elif args.autostart:
         systemctl(args.user, "enable", "--now", f"{name}.service")
-        print(f"enabled and started {name}.service", file=sys.stderr)
+        print(f"enabled and started {name}.service "
+              f"(WantedBy={service_install_target})", file=sys.stderr)
+    else:
+        # No [Install] section, so `enable` would fail. Just start it.
+        systemctl(args.user, "start", f"{name}.service")
+        print(f"started {name}.service "
+              f"(no autostart — pass --autostart to enable on boot)",
+              file=sys.stderr)
 
 
 def cmd_delete(args):
@@ -243,6 +275,14 @@ def build_parser():
     p_service.add_argument("--persistent", action="store_true",
                            help="Add Persistent=true to timer "
                                 "(catches up missed runs after reboot)")
+    p_service.add_argument("--autostart", action="store_true",
+                           help="Add an [Install] section so the service "
+                                "starts on boot/login (default target depends "
+                                "on --user). Required for daemons.")
+    p_service.add_argument("--install-target", default=None,
+                           help="Override the WantedBy= for --autostart "
+                                "(default: default.target for --user, "
+                                "multi-user.target for system)")
     p_service.add_argument("--edit", action="store_true",
                            help="Overwrite existing unit files")
     p_service.add_argument("--no-enable", action="store_true",
