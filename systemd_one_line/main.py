@@ -171,12 +171,18 @@ def cmd_service(args):
     else:
         service_install_target = None
 
+    # Extra [Service] entries built up from flags.
+    extras = []
+    if args.path:
+        extras.append(f"Environment=PATH={os.environ.get('PATH', '')}")
+
     service_body = render_service(
         exec_cmd=args.exec,
         description=description,
         service_type=args.type,
         user=args.run_as,
         install_target=service_install_target,
+        extra=extras,
     )
     write_unit(svc_path, service_body, user=args.user)
     print(f"wrote {svc_path}", file=sys.stderr)
@@ -283,6 +289,10 @@ def build_parser():
                            help="Override the WantedBy= for --autostart "
                                 "(default: default.target for --user, "
                                 "multi-user.target for system)")
+    p_service.add_argument("--path", action="store_true",
+                           help="Copy the current shell's PATH into the "
+                                "service environment, so child processes "
+                                "can find user binaries (e.g. ~/.local/bin)")
     p_service.add_argument("--edit", action="store_true",
                            help="Overwrite existing unit files")
     p_service.add_argument("--no-enable", action="store_true",
